@@ -8,7 +8,7 @@ Local dashboard for monitoring your Claude Code usage. Claude Code exports OpenT
 - Time-series charts with 1h / 24h / 7d / 30d / all ranges, updated live over SSE
 - Remaining plan limits (5h session and weekly windows) read from the same endpoint Claude Code's `/usage` screen uses
 
-Everything stays on your machine: the only outbound request is the optional plan-limits lookup to Anthropic's API.
+Everything stays on your machine except the optional plan-limits lookup to Anthropic's API and optional Telegram alerts.
 
 ## Requirements
 
@@ -82,6 +82,18 @@ Data is stored in `.data/claude-usage.sqlite`. Delete the file to start fresh.
 
 The dashboard shows remaining session (5h) and weekly plan limits at the top. The server reads the OAuth token from `~/.claude/.credentials.json` and queries `https://api.anthropic.com/api/oauth/usage` (the same unofficial endpoint Claude Code's `/usage` screen uses), cached for 30 seconds. Anthropic reports utilization percentages and reset times, not raw token counts. If the token is missing or expired, the strip shows why instead of failing.
 
+## Telegram session refresh alerts
+
+Set these variables before starting the server to get a Telegram message when the observed 5h Claude Code token session refreshes:
+
+```bash
+export TELEGRAM_BOT_TOKEN=123456:replace-me
+export TELEGRAM_CHAT_ID=123456789
+pnpm dev
+```
+
+When both values are set, the server checks plan limits every 60 seconds. The alert fires once for each observed 5h reset time after that reset time has passed.
+
 ## Configuration
 
 | Env var | Default | Description |
@@ -89,6 +101,27 @@ The dashboard shows remaining session (5h) and weekly plan limits at the top. Th
 | `PORT` | `4318` | Server / OTLP receiver port |
 | `HOST` | `0.0.0.0` | Server bind address |
 | `DATABASE_PATH` | `.data/claude-usage.sqlite` | SQLite database location |
+| `LIMITS_SOURCE` | `fetch` | `fetch` reads the local OAuth token and queries Anthropic; `push` serves a snapshot sent to `POST /api/limits/ingest` (used for remote deployment) |
+| `LIMITS_INGEST_SECRET` | required when `LIMITS_SOURCE=push` | Secret the ingest route requires in the `Authorization` header; the server refuses to start in push mode without it |
+| `TELEGRAM_BOT_TOKEN` | unset | Telegram bot token for session refresh alerts |
+| `TELEGRAM_CHAT_ID` | unset | Telegram chat ID that receives session refresh alerts |
+
+The limits pusher (`dist/server/server/limits-pusher.js`) reads:
+
+| Env var | Default | Description |
+| --- | --- | --- |
+| `DASHBOARD_INGEST_URL` | required | URL of the remote `POST /api/limits/ingest` endpoint |
+| `DASHBOARD_INGEST_AUTH` | unset | Value sent as the `Authorization` header (e.g. `Basic <base64>`) |
+| `LIMITS_PUSH_INTERVAL_MS` | `60000` | How often to fetch and push the limits snapshot |
+
+## Remote deployment
+
+To keep the dashboard always up on a server while keeping your Claude OAuth token on your own machine:
+
+- **Server** (`LIMITS_SOURCE=push`) receives telemetry, serves the dashboard, and exposes `POST /api/limits/ingest`. It never reads a token. Put it behind a reverse proxy with TLS + auth.
+- **Local machine** runs the limits pusher, which fetches plan limits with your local token, sends Telegram alerts, and pushes only the resulting snapshot (utilization percentages and reset times) to the server. The token never leaves your machine.
+
+Point Claude Code at the server by setting `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` to the server's `/v1/metrics` URL (add an `OTEL_EXPORTER_OTLP_METRICS_HEADERS=Authorization=...` entry if the proxy requires auth).
 
 ## Development
 
