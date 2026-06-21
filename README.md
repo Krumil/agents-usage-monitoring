@@ -105,6 +105,10 @@ When both values are set, the server checks plan limits every 60 seconds. The al
 | `LIMITS_INGEST_SECRET` | required when `LIMITS_SOURCE=push` | Secret the ingest route requires in the `Authorization` header; the server refuses to start in push mode without it |
 | `TELEGRAM_BOT_TOKEN` | unset | Telegram bot token for session refresh alerts |
 | `TELEGRAM_CHAT_ID` | unset | Telegram chat ID that receives session refresh alerts |
+| `VAPID_PUBLIC_KEY` | unset | Web Push public VAPID key; enables phone push notifications in push mode when set with the private key and subject |
+| `VAPID_PRIVATE_KEY` | unset | Web Push private VAPID key |
+| `VAPID_SUBJECT` | unset | VAPID contact, a `mailto:` or `https:` URL |
+| `DAILY_SUMMARY_HOUR` | unset | Hour (0–23, server local time) to push a daily cost/token/session summary; unset disables it |
 
 The limits pusher (`dist/server/server/limits-pusher.js`) reads:
 
@@ -123,6 +127,44 @@ To keep the dashboard always up on a server while keeping your Claude OAuth toke
 
 Point Claude Code at the server by setting `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` to the server's `/v1/metrics` URL (add an `OTEL_EXPORTER_OTLP_METRICS_HEADERS=Authorization=...` entry if the proxy requires auth).
 
+## Install on your phone + push notifications
+
+The dashboard is an installable PWA. On a remote (push-mode) deployment served over HTTPS it can also send notifications to your phone — when the 5h session resets and an optional daily summary — using the Web Push standard. No Firebase or app store needed.
+
+Push requires a secure context (HTTPS, which the remote deployment already has) and a VAPID key pair. Generate one once:
+
+```bash
+npx web-push generate-vapid-keys
+```
+
+Set the keys on the **server** (push mode):
+
+```bash
+export LIMITS_SOURCE=push
+export LIMITS_INGEST_SECRET=...        # already required in push mode
+export VAPID_PUBLIC_KEY=BPx...
+export VAPID_PRIVATE_KEY=...
+export VAPID_SUBJECT=mailto:you@example.com
+export DAILY_SUMMARY_HOUR=9            # optional, server local time
+pnpm start
+```
+
+Then on your Android phone:
+
+1. Open the dashboard's public HTTPS URL in Chrome.
+2. Use the browser menu → **Add to Home screen** to install it.
+3. Open it from the home-screen icon and tap **Enable alerts**, then grant the notification permission.
+
+Notifications arrive even when the app is closed. Session-reset alerts mirror the Telegram wording; the daily summary reports the last 24h cost, tokens, and session count. Subscriptions are stored server-side in SQLite and pruned automatically when a browser drops them.
+
+To confirm a notification reaches your phone after subscribing, fire a test push (reads the same VAPID env and the server's database):
+
+```bash
+node scripts/send-test-push.mjs "Test" "Hello from the server"
+```
+
+> A home-screen *widget* (a live tile) is not possible from a PWA — Android has no web API for it and it would require a separate native app. This delivers an app icon plus push notifications, which is the most you can do without going native.
+
 ## Development
 
 ```bash
@@ -134,6 +176,6 @@ pnpm check       # typecheck + test + build
 
 ## How it works
 
-- `src/server` — Fastify app. `POST /v1/metrics` accepts OTLP JSON from Claude Code, parses the samples, and writes them to SQLite (better-sqlite3). `GET /api/dashboard` aggregates totals, time buckets, and breakdowns for a range; `GET /api/live` streams updates over SSE on every ingest; `GET /api/limits` proxies plan limits.
+- `src/server` — Fastify app. `POST /v1/metrics` accepts OTLP JSON from Claude Code, parses the samples, and writes them to SQLite (better-sqlite3). `GET /api/dashboard` aggregates totals, time buckets, and breakdowns for a range; `GET /api/live` streams updates over SSE on every ingest; `GET /api/limits` proxies plan limits. In push mode with VAPID keys set, `GET /api/push/vapid-public-key` and `POST /api/push/{subscribe,unsubscribe}` manage Web Push subscriptions.
 - `src/client` — React + Vite single-page dashboard.
 - `src/shared` — typed contracts shared between server and client.

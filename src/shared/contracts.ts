@@ -83,6 +83,15 @@ export interface SetupInstructions {
   snippet: string;
 }
 
+export interface PushSubscriptionPayload {
+  endpoint: string;
+  expirationTime: number | null;
+  keys: {
+    p256dh: string;
+    auth: string;
+  };
+}
+
 export interface LimitWindow {
   key: string;
   label: string;

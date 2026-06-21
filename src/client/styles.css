@@ -625,6 +625,38 @@ h1::after {
   opacity: 0.5;
 }
 
+.alerts-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  padding: 8px 12px;
+  border: 2px solid var(--line);
+  background: var(--bg-deep);
+  color: var(--text);
+  font-family: var(--label);
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.alerts-button svg {
+  color: var(--gold);
+}
+
+.alerts-button.on svg {
+  color: var(--lime);
+}
+
+.alerts-button:hover:not(:disabled) {
+  background: var(--surface-raised);
+}
+
+.alerts-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
 @media (max-width: 1180px) {
   .metric-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));

@@ -40,12 +40,20 @@ export interface PushedLimitsProvider extends LimitsProvider {
 
 export interface PushedLimitsProviderOptions {
   maxAgeMs?: number;
+  sessionRefreshNotifier?: SessionRefreshNotifier;
+  onNotificationError?: (error: unknown, event: SessionRefreshEvent) => void;
 }
 
 const DEFAULT_PUSHED_MAX_AGE_MS = 300_000;
 
 export function createPushedLimitsProvider(options: PushedLimitsProviderOptions = {}): PushedLimitsProvider {
   const maxAgeMs = options.maxAgeMs ?? DEFAULT_PUSHED_MAX_AGE_MS;
+  const observer = options.sessionRefreshNotifier
+    ? createSessionRefreshObserver({
+        notifier: options.sessionRefreshNotifier,
+        onNotificationError: options.onNotificationError
+      })
+    : null;
 
   let latest: UsageLimits | null = null;
   let receivedAtMs = 0;
@@ -54,6 +62,9 @@ export function createPushedLimitsProvider(options: PushedLimitsProviderOptions 
     ingest(limits: UsageLimits): void {
       latest = limits;
       receivedAtMs = Date.now();
+      if (observer) {
+        void observer.observe(limits, receivedAtMs).catch(() => undefined);
+      }
     },
     async getLimits(): Promise<UsageLimits> {
       const now = Date.now();
@@ -86,6 +97,31 @@ export interface SessionRefreshNotifier {
   sendSessionRefreshAlert(event: SessionRefreshEvent): Promise<void>;
 }
 
+export interface SessionRefreshObserverOptions {
+  notifier?: SessionRefreshNotifier | undefined;
+  onNotificationError?: ((error: unknown, event: SessionRefreshEvent) => void) | undefined;
+}
+
+export interface SessionRefreshObserver {
+  observe(limits: UsageLimits, nowMs: number): Promise<void>;
+}
+
+export function createSessionRefreshObserver(
+  options: SessionRefreshObserverOptions = {}
+): SessionRefreshObserver {
+  const state: SessionRefreshState = {
+    watchedResetAt: null,
+    alertedResetAt: null,
+    pendingAlert: null
+  };
+
+  return {
+    observe(limits: UsageLimits, nowMs: number): Promise<void> {
+      return observeSessionRefresh(limits, state, options, nowMs);
+    }
+  };
+}
+
 export function defaultCredentialsPath(): string {
   return path.join(os.homedir(), ".claude", ".credentials.json");
 }
@@ -99,17 +135,16 @@ export function createLimitsProvider(options: LimitsProviderOptions = {}): Limit
   let cached: UsageLimits | null = null;
   let nextFetchAtMs = 0;
   let lastGood: AvailableUsageLimits | null = null;
-  const sessionRefreshState: SessionRefreshState = {
-    watchedResetAt: null,
-    alertedResetAt: null,
-    pendingAlert: null
-  };
+  const observer = createSessionRefreshObserver({
+    notifier: options.sessionRefreshNotifier,
+    onNotificationError: options.onNotificationError
+  });
 
   return {
     async getLimits(): Promise<UsageLimits> {
       const now = Date.now();
       if (cached && now < nextFetchAtMs) {
-        await observeSessionRefresh(cached, sessionRefreshState, options, now);
+        await observer.observe(cached, now);
         return cached;
       }
 
@@ -120,7 +155,7 @@ export function createLimitsProvider(options: LimitsProviderOptions = {}): Limit
 
       cached = !outcome.limits.available && outcome.transient && lastGood ? lastGood : outcome.limits;
       nextFetchAtMs = now + Math.max(cacheTtlMs, outcome.retryAfterMs ?? 0);
-      await observeSessionRefresh(cached, sessionRefreshState, options, now);
+      await observer.observe(cached, now);
       return cached;
     }
   };
@@ -190,7 +225,7 @@ function failure(
 async function observeSessionRefresh(
   limits: UsageLimits,
   state: SessionRefreshState,
-  options: LimitsProviderOptions,
+  options: SessionRefreshObserverOptions,
   nowMs: number
 ): Promise<void> {
   if (state.pendingAlert) {
@@ -243,9 +278,9 @@ async function observeSessionRefresh(
 async function sendSessionRefreshAlert(
   event: SessionRefreshEvent,
   state: SessionRefreshState,
-  options: LimitsProviderOptions
+  options: SessionRefreshObserverOptions
 ): Promise<boolean> {
-  const notifier = options.sessionRefreshNotifier;
+  const notifier = options.notifier;
   if (!notifier) {
     state.alertedResetAt = event.resetAt;
     state.pendingAlert = null;

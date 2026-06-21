@@ -3,6 +3,12 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { getDashboard, getLimits, getSetup } from "./api.js";
 import { PixelIcon } from "./icons.js";
 import {
+  disablePushNotifications,
+  enablePushNotifications,
+  hasActivePushSubscription,
+  isPushSupported
+} from "./push.js";
+import {
   formatCompact,
   formatCost,
   formatCostCents,
@@ -150,6 +156,7 @@ export function App(): ReactNode {
           <h1>Claude Code usage</h1>
         </div>
         <div className="topbar-actions">
+          <AlertsButton />
           <div className={isLive ? "status-pill live" : "status-pill"} aria-live="polite">
             <PixelIcon name="signal" size={16} />
             {isLive ? "Live" : "Connecting"}
@@ -263,6 +270,88 @@ export function App(): ReactNode {
         <pre>{setup?.snippet ?? "Loading setup command..."}</pre>
       </section>
     </main>
+  );
+}
+
+type AlertsState = "unknown" | "unsupported" | "denied" | "on" | "off";
+
+function AlertsButton(): ReactNode {
+  const [state, setState] = useState<AlertsState>("unknown");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    void (async () => {
+      if (!isPushSupported()) {
+        if (!cancelled) {
+          setState("unsupported");
+        }
+        return;
+      }
+
+      if (Notification.permission === "denied") {
+        if (!cancelled) {
+          setState("denied");
+        }
+        return;
+      }
+
+      const active = await hasActivePushSubscription();
+      if (!cancelled) {
+        setState(active ? "on" : "off");
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const toggle = useCallback(() => {
+    setBusy(true);
+    void (async () => {
+      try {
+        if (state === "on") {
+          await disablePushNotifications();
+          setState("off");
+        } else {
+          const enabled = await enablePushNotifications();
+          setState(enabled ? "on" : Notification.permission === "denied" ? "denied" : "off");
+        }
+      } catch {
+        setState(Notification.permission === "denied" ? "denied" : "off");
+      } finally {
+        setBusy(false);
+      }
+    })();
+  }, [state]);
+
+  if (state === "unknown" || state === "unsupported") {
+    return null;
+  }
+
+  const isOn = state === "on";
+  const label = state === "denied" ? "Alerts blocked" : isOn ? "Alerts on" : "Enable alerts";
+
+  return (
+    <button
+      type="button"
+      className={isOn ? "alerts-button on" : "alerts-button"}
+      onClick={toggle}
+      disabled={busy || state === "denied"}
+      title={
+        state === "denied"
+          ? "Notifications are blocked. Enable them in your browser settings."
+          : isOn
+            ? "Disable usage push notifications"
+            : "Enable usage push notifications"
+      }
+      aria-pressed={isOn}
+    >
+      <PixelIcon name="bell" size={16} />
+      {label}
+    </button>
   );
 }
 

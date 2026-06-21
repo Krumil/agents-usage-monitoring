@@ -6,7 +6,8 @@ import path from "node:path";
 import fastifyStatic from "@fastify/static";
 import Fastify, { type FastifyInstance } from "fastify";
 
-import { isRangeKey, type RangeKey } from "../shared/contracts.js";
+import { isRangeKey, type PushSubscriptionPayload, type RangeKey } from "../shared/contracts.js";
+import { startDailySummaryScheduler } from "./daily-summary.js";
 import { buildDashboard } from "./dashboard.js";
 import { UsageDatabase } from "./db.js";
 import { OtlpParseError, UnsupportedOtlpContentTypeError } from "./errors.js";
@@ -17,6 +18,7 @@ import {
   type LimitsProviderOptions
 } from "./limits.js";
 import { parseOtlpMetrics } from "./otel.js";
+import { createPushSender, type VapidConfig } from "./push.js";
 import { buildSetupInstructions } from "./setup.js";
 
 export interface CreateAppOptions {
@@ -28,6 +30,8 @@ export interface CreateAppOptions {
   limitsWatchIntervalMs?: number;
   limitsSource?: "fetch" | "push";
   ingestSecret?: string;
+  vapid?: VapidConfig;
+  dailySummaryHour?: number;
 }
 
 interface QueryRecord {
@@ -92,7 +96,23 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
   app.get("/api/setup", async () => buildSetupInstructions(options.port));
 
   if (options.limitsSource === "push") {
-    const pushedProvider = createPushedLimitsProvider();
+    const vapid = options.vapid;
+    const pushSender = vapid
+      ? createPushSender(database, vapid, (error, endpoint) => {
+          app.log.error({ err: error, endpoint }, "Web push send failed");
+        })
+      : null;
+
+    const pushedProvider = createPushedLimitsProvider(
+      pushSender
+        ? {
+            sessionRefreshNotifier: pushSender.createSessionRefreshNotifier(),
+            onNotificationError: (error, event) => {
+              app.log.error({ err: error, event }, "Session refresh push failed");
+            }
+          }
+        : {}
+    );
 
     const ingestSecret = options.ingestSecret;
     app.post("/api/limits/ingest", async (request, reply) => {
@@ -113,6 +133,49 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
     });
 
     app.get("/api/limits", async () => pushedProvider.getLimits());
+
+    if (pushSender && vapid) {
+      app.get("/api/push/vapid-public-key", async () => ({ key: vapid.publicKey }));
+
+      app.post("/api/push/subscribe", async (request, reply) => {
+        const subscription = parsePushSubscription(request.body);
+        if (!subscription) {
+          reply.code(400).send({ error: "Invalid push subscription." });
+          return;
+        }
+
+        database.savePushSubscription(subscription);
+        reply.header("Content-Type", "application/json");
+        return {};
+      });
+
+      app.post("/api/push/unsubscribe", async (request, reply) => {
+        const endpoint = readEndpoint(request.body);
+        if (!endpoint) {
+          reply.code(400).send({ error: "Missing subscription endpoint." });
+          return;
+        }
+
+        database.deletePushSubscription(endpoint);
+        reply.header("Content-Type", "application/json");
+        return {};
+      });
+
+      if (options.dailySummaryHour !== undefined) {
+        const scheduler = startDailySummaryScheduler({
+          database,
+          pushSender,
+          hour: options.dailySummaryHour,
+          onError: (error) => {
+            app.log.error({ err: error }, "Daily summary push failed");
+          }
+        });
+
+        app.addHook("onClose", async () => {
+          scheduler.stop();
+        });
+      }
+    }
   } else {
     const limitsProvider = createLimitsProvider(
       options.limits?.sessionRefreshNotifier && !options.limits.onNotificationError
@@ -217,4 +280,39 @@ function authorizeIngest(provided: string | undefined, expected: string): boolea
   const providedHash = crypto.createHash("sha256").update(provided).digest();
   const expectedHash = crypto.createHash("sha256").update(expected).digest();
   return crypto.timingSafeEqual(providedHash, expectedHash);
+}
+
+function parsePushSubscription(body: unknown): PushSubscriptionPayload | null {
+  if (typeof body !== "object" || body === null) {
+    return null;
+  }
+
+  const record = body as Record<string, unknown>;
+  const endpoint = record.endpoint;
+  const keys = record.keys;
+  if (typeof endpoint !== "string" || typeof keys !== "object" || keys === null) {
+    return null;
+  }
+
+  const keyRecord = keys as Record<string, unknown>;
+  const p256dh = keyRecord.p256dh;
+  const auth = keyRecord.auth;
+  if (typeof p256dh !== "string" || typeof auth !== "string") {
+    return null;
+  }
+
+  return {
+    endpoint,
+    expirationTime: typeof record.expirationTime === "number" ? record.expirationTime : null,
+    keys: { p256dh, auth }
+  };
+}
+
+function readEndpoint(body: unknown): string | null {
+  if (typeof body !== "object" || body === null) {
+    return null;
+  }
+
+  const endpoint = (body as Record<string, unknown>).endpoint;
+  return typeof endpoint === "string" ? endpoint : null;
 }

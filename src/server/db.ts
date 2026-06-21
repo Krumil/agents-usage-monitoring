@@ -3,11 +3,21 @@ import path from "node:path";
 
 import Database from "better-sqlite3";
 
-import type { IngestStatus } from "../shared/contracts.js";
+import type { IngestStatus, PushSubscriptionPayload } from "../shared/contracts.js";
 import type { AttributeMap, ParsedMetricSample } from "./otel.js";
 
 export interface StoredMetricSample extends ParsedMetricSample {
   id: number;
+}
+
+export interface StoredPushSubscription {
+  endpoint: string;
+  subscription: PushSubscriptionPayload;
+}
+
+interface PushSubscriptionRow {
+  endpoint: string;
+  subscription_json: string;
 }
 
 interface MetricSampleRow {
@@ -127,6 +137,33 @@ export class UsageDatabase {
     };
   }
 
+  public savePushSubscription(subscription: PushSubscriptionPayload, createdAtMs = Date.now()): void {
+    this.database
+      .prepare(
+        `
+        INSERT INTO push_subscriptions (endpoint, subscription_json, created_at_ms)
+        VALUES (?, ?, ?)
+        ON CONFLICT(endpoint) DO UPDATE SET subscription_json = excluded.subscription_json
+      `
+      )
+      .run(subscription.endpoint, JSON.stringify(subscription), createdAtMs);
+  }
+
+  public deletePushSubscription(endpoint: string): void {
+    this.database.prepare("DELETE FROM push_subscriptions WHERE endpoint = ?").run(endpoint);
+  }
+
+  public listPushSubscriptions(): StoredPushSubscription[] {
+    const rows = this.database
+      .prepare("SELECT endpoint, subscription_json FROM push_subscriptions")
+      .all() as PushSubscriptionRow[];
+
+    return rows.map((row) => ({
+      endpoint: row.endpoint,
+      subscription: JSON.parse(row.subscription_json) as PushSubscriptionPayload
+    }));
+  }
+
   public close(): void {
     this.database.close();
   }
@@ -161,6 +198,12 @@ export class UsageDatabase {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         received_at_ms INTEGER NOT NULL,
         sample_count INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS push_subscriptions (
+        endpoint TEXT PRIMARY KEY,
+        subscription_json TEXT NOT NULL,
+        created_at_ms INTEGER NOT NULL
       );
     `);
   }
