@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "packageManager": "pnpm@10.19.0",
   "scripts": {
     "dev": "concurrently -k -n server,client \"pnpm dev:server\" \"pnpm dev:client\"",
     "dev:server": "tsx watch src/server/index.ts",
