@@ -8,6 +8,7 @@ const publicDir = join(here, "..", "public");
 
 const BACKGROUND = [10, 10, 20];
 const MARK = [155, 240, 70];
+const WHITE = [255, 255, 255];
 
 const GLYPH = [
   "01100110",
@@ -20,13 +21,15 @@ const GLYPH = [
   "00000000"
 ];
 
-function renderIcon(size, paddingRatio) {
+function renderIcon(size, { paddingRatio, background, mark }) {
   const pixels = Buffer.alloc(size * size * 4);
-  for (let i = 0; i < size * size; i += 1) {
-    pixels[i * 4] = BACKGROUND[0];
-    pixels[i * 4 + 1] = BACKGROUND[1];
-    pixels[i * 4 + 2] = BACKGROUND[2];
-    pixels[i * 4 + 3] = 255;
+  if (background) {
+    for (let i = 0; i < size * size; i += 1) {
+      pixels[i * 4] = background[0];
+      pixels[i * 4 + 1] = background[1];
+      pixels[i * 4 + 2] = background[2];
+      pixels[i * 4 + 3] = 255;
+    }
   }
 
   const pad = Math.round(size * paddingRatio);
@@ -46,9 +49,9 @@ function renderIcon(size, paddingRatio) {
       for (let y = y0; y < y1; y += 1) {
         for (let x = x0; x < x1; x += 1) {
           const idx = (y * size + x) * 4;
-          pixels[idx] = MARK[0];
-          pixels[idx + 1] = MARK[1];
-          pixels[idx + 2] = MARK[2];
+          pixels[idx] = mark[0];
+          pixels[idx + 1] = mark[1];
+          pixels[idx + 2] = mark[2];
           pixels[idx + 3] = 255;
         }
       }
@@ -109,8 +112,9 @@ function crc32(buffer) {
 }
 
 mkdirSync(publicDir, { recursive: true });
-writeFileSync(join(publicDir, "icon-192.png"), renderIcon(192, 0.12));
-writeFileSync(join(publicDir, "icon-512.png"), renderIcon(512, 0.12));
-writeFileSync(join(publicDir, "icon-maskable-512.png"), renderIcon(512, 0.22));
+writeFileSync(join(publicDir, "icon-192.png"), renderIcon(192, { paddingRatio: 0.12, background: BACKGROUND, mark: MARK }));
+writeFileSync(join(publicDir, "icon-512.png"), renderIcon(512, { paddingRatio: 0.12, background: BACKGROUND, mark: MARK }));
+writeFileSync(join(publicDir, "icon-maskable-512.png"), renderIcon(512, { paddingRatio: 0.22, background: BACKGROUND, mark: MARK }));
+writeFileSync(join(publicDir, "icon-badge.png"), renderIcon(96, { paddingRatio: 0.1, background: null, mark: WHITE }));
 
-console.log("Generated icon-192.png, icon-512.png, icon-maskable-512.png in public/");
+console.log("Generated icon-192.png, icon-512.png, icon-maskable-512.png, icon-badge.png in public/");
