@@ -19,15 +19,14 @@ function sampleLimits(fetchedAt = "2026-06-18T10:00:00.000Z"): AvailableUsageLim
   };
 }
 
-function makeApp(ingestSecret?: string): ReturnType<typeof createApp> {
+function makeApp(): ReturnType<typeof createApp> {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "claude-pushed-"));
   tempDirs.push(tempDir);
   return createApp({
     databasePath: path.join(tempDir, "usage.sqlite"),
     port: 4318,
     logger: false,
-    limitsSource: "push",
-    ...(ingestSecret ? { ingestSecret } : {})
+    limitsSource: "push"
   });
 }
 
@@ -123,47 +122,6 @@ describe("limits ingest route", () => {
     const response = await app.inject({ method: "GET", url: "/api/limits" });
     expect(response.statusCode).toBe(200);
     expect(response.json().available).toBe(false);
-
-    await app.close();
-  });
-
-  it("should reject ingest without the configured secret", async () => {
-    const app = await makeApp("Basic secret-token");
-    await app.ready();
-
-    const noAuth = await app.inject({
-      method: "POST",
-      url: "/api/limits/ingest",
-      headers: { "content-type": "application/json" },
-      payload: JSON.stringify(sampleLimits())
-    });
-    expect(noAuth.statusCode).toBe(401);
-
-    const wrongAuth = await app.inject({
-      method: "POST",
-      url: "/api/limits/ingest",
-      headers: { "content-type": "application/json", authorization: "Basic wrong-token" },
-      payload: JSON.stringify(sampleLimits())
-    });
-    expect(wrongAuth.statusCode).toBe(401);
-
-    await app.close();
-  });
-
-  it("should accept ingest with the configured secret", async () => {
-    const app = await makeApp("Basic secret-token");
-    await app.ready();
-
-    const response = await app.inject({
-      method: "POST",
-      url: "/api/limits/ingest",
-      headers: { "content-type": "application/json", authorization: "Basic secret-token" },
-      payload: JSON.stringify(sampleLimits())
-    });
-    expect(response.statusCode).toBe(200);
-
-    const limitsResponse = await app.inject({ method: "GET", url: "/api/limits" });
-    expect(limitsResponse.json()).toEqual(sampleLimits());
 
     await app.close();
   });

@@ -12,7 +12,6 @@ if (fs.existsSync(envPath)) {
 }
 
 const ingestUrl = process.env.DASHBOARD_INGEST_URL;
-const ingestAuth = process.env.DASHBOARD_INGEST_AUTH;
 const intervalMs = Number(process.env.LIMITS_PUSH_INTERVAL_MS ?? 60_000);
 
 if (!ingestUrl) {
@@ -32,8 +31,7 @@ async function pushLimits(target: string): Promise<void> {
   const response = await fetch(target, {
     method: "POST",
     headers: {
-      "Content-Type": "application/json",
-      ...(ingestAuth ? { Authorization: ingestAuth } : {})
+      "Content-Type": "application/json"
     },
     body: JSON.stringify(limits)
   });

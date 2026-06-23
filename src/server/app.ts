@@ -1,4 +1,3 @@
-import crypto from "node:crypto";
 import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import path from "node:path";
@@ -29,7 +28,6 @@ export interface CreateAppOptions {
   limits?: LimitsProviderOptions;
   limitsWatchIntervalMs?: number;
   limitsSource?: "fetch" | "push";
-  ingestSecret?: string;
   vapid?: VapidConfig;
   dailySummaryHour?: number;
 }
@@ -114,13 +112,7 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
         : {}
     );
 
-    const ingestSecret = options.ingestSecret;
     app.post("/api/limits/ingest", async (request, reply) => {
-      if (ingestSecret && !authorizeIngest(request.headers.authorization, ingestSecret)) {
-        reply.code(401).send({ error: "Unauthorized." });
-        return;
-      }
-
       const limits = parseUsageLimits(request.body);
       if (!limits) {
         reply.code(400).send({ error: "Invalid limits payload." });
@@ -270,16 +262,6 @@ function parseRange(query: unknown, fallback: RangeKey): RangeKey | null {
 
 export function resolveStaticDir(): string {
   return path.resolve(process.cwd(), "dist/client");
-}
-
-function authorizeIngest(provided: string | undefined, expected: string): boolean {
-  if (!provided) {
-    return false;
-  }
-
-  const providedHash = crypto.createHash("sha256").update(provided).digest();
-  const expectedHash = crypto.createHash("sha256").update(expected).digest();
-  return crypto.timingSafeEqual(providedHash, expectedHash);
 }
 
 function parsePushSubscription(body: unknown): PushSubscriptionPayload | null {

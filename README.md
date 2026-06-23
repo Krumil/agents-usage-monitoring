@@ -102,7 +102,6 @@ When both values are set, the server checks plan limits every 60 seconds. The al
 | `HOST` | `0.0.0.0` | Server bind address |
 | `DATABASE_PATH` | `.data/claude-usage.sqlite` | SQLite database location |
 | `LIMITS_SOURCE` | `fetch` | `fetch` reads the local OAuth token and queries Anthropic; `push` serves a snapshot sent to `POST /api/limits/ingest` (used for remote deployment) |
-| `LIMITS_INGEST_SECRET` | required when `LIMITS_SOURCE=push` | Secret the ingest route requires in the `Authorization` header; the server refuses to start in push mode without it |
 | `TELEGRAM_BOT_TOKEN` | unset | Telegram bot token for session refresh alerts |
 | `TELEGRAM_CHAT_ID` | unset | Telegram chat ID that receives session refresh alerts |
 | `VAPID_PUBLIC_KEY` | unset | Web Push public VAPID key; enables phone push notifications in push mode when set with the private key and subject |
@@ -115,14 +114,13 @@ The limits pusher (`dist/server/server/limits-pusher.js`) reads:
 | Env var | Default | Description |
 | --- | --- | --- |
 | `DASHBOARD_INGEST_URL` | required | URL of the remote `POST /api/limits/ingest` endpoint |
-| `DASHBOARD_INGEST_AUTH` | unset | Value sent as the `Authorization` header (e.g. `Basic <base64>`) |
 | `LIMITS_PUSH_INTERVAL_MS` | `60000` | How often to fetch and push the limits snapshot |
 
 ## Remote deployment
 
 To keep the dashboard always up on a server while keeping your Claude OAuth token on your own machine:
 
-- **Server** (`LIMITS_SOURCE=push`) receives telemetry, serves the dashboard, and exposes `POST /api/limits/ingest`. It never reads a token. Put it behind a reverse proxy with TLS + auth.
+- **Server** (`LIMITS_SOURCE=push`) receives telemetry, serves the dashboard, and exposes `POST /api/limits/ingest`. It never reads a token. The ingest endpoint is unauthenticated, so a reverse proxy with TLS (and auth, if the server is publicly reachable) is the only access perimeter.
 - **Local machine** runs the limits pusher, which fetches plan limits with your local token, sends Telegram alerts, and pushes only the resulting snapshot (utilization percentages and reset times) to the server. The token never leaves your machine.
 
 Point Claude Code at the server by setting `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` to the server's `/v1/metrics` URL (add an `OTEL_EXPORTER_OTLP_METRICS_HEADERS=Authorization=...` entry if the proxy requires auth).
@@ -141,7 +139,6 @@ Set the keys on the **server** (push mode):
 
 ```bash
 export LIMITS_SOURCE=push
-export LIMITS_INGEST_SECRET=...        # already required in push mode
 export VAPID_PUBLIC_KEY=BPx...
 export VAPID_PRIVATE_KEY=...
 export VAPID_SUBJECT=mailto:you@example.com

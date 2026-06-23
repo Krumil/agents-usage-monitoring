@@ -17,11 +17,6 @@ const databasePath = path.resolve(process.env.DATABASE_PATH ?? ".data/claude-usa
 const limitsSource = process.env.LIMITS_SOURCE === "push" ? "push" : "fetch";
 const sessionRefreshNotifier = limitsSource === "push" ? null : createTelegramSessionRefreshNotifierFromEnv();
 
-const ingestSecret = process.env.LIMITS_INGEST_SECRET;
-if (limitsSource === "push" && !ingestSecret) {
-  throw new Error("LIMITS_INGEST_SECRET is required when LIMITS_SOURCE=push (protects POST /api/limits/ingest).");
-}
-
 const vapid = resolveVapidConfig();
 const dailySummaryHour = resolveDailySummaryHour(process.env.DAILY_SUMMARY_HOUR);
 
@@ -30,7 +25,6 @@ const app = await createApp({
   port,
   staticDir: resolveStaticDir(),
   limitsSource,
-  ...(ingestSecret ? { ingestSecret } : {}),
   ...(sessionRefreshNotifier ? { limits: { sessionRefreshNotifier } } : {}),
   ...(vapid ? { vapid } : {}),
   ...(dailySummaryHour !== undefined ? { dailySummaryHour } : {})
