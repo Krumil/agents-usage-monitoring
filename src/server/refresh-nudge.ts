@@ -240,8 +240,13 @@ async function notifyRefreshNudgeScheduled(
   event: RefreshNudgeScheduledEvent,
   log: RefreshNudgeLogHandler
 ): Promise<void> {
+  if (!options.notifier) {
+    return;
+  }
+
   try {
-    await options.notifier?.sendRefreshNudgeScheduled(event);
+    await options.notifier.sendRefreshNudgeScheduled(event);
+    log("info", "Refresh nudge Telegram notification sent", { event: "scheduled", resetAt: event.resetAt });
   } catch (error) {
     log("error", "Refresh nudge Telegram notification failed", {
       event: "scheduled",
@@ -256,8 +261,13 @@ async function notifyRefreshNudgeSent(
   event: RefreshNudgeSentEvent,
   log: RefreshNudgeLogHandler
 ): Promise<void> {
+  if (!options.notifier) {
+    return;
+  }
+
   try {
-    await options.notifier?.sendRefreshNudgeSent(event);
+    await options.notifier.sendRefreshNudgeSent(event);
+    log("info", "Refresh nudge Telegram notification sent", { event: "sent", resetAt: event.resetAt });
   } catch (error) {
     log("error", "Refresh nudge Telegram notification failed", {
       event: "sent",
@@ -272,8 +282,13 @@ async function notifyRefreshNudgeFailed(
   event: RefreshNudgeFailedEvent,
   log: RefreshNudgeLogHandler
 ): Promise<void> {
+  if (!options.notifier) {
+    return;
+  }
+
   try {
-    await options.notifier?.sendRefreshNudgeFailed(event);
+    await options.notifier.sendRefreshNudgeFailed(event);
+    log("info", "Refresh nudge Telegram notification sent", { event: "failed", resetAt: event.resetAt });
   } catch (error) {
     log("error", "Refresh nudge Telegram notification failed", {
       event: "failed",
