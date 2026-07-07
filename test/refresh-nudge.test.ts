@@ -76,6 +76,32 @@ describe("refresh nudge scheduler", () => {
     expect(runCommand).toHaveBeenCalledTimes(1);
   });
 
+  it("should ignore small reset estimate jitter", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-11T13:00:00.000Z"));
+    const runCommand = vi.fn<RefreshCommandRunner>(async () => undefined);
+    const notifier: RefreshNudgeNotifier = {
+      sendRefreshNudgeScheduled: vi.fn(async () => undefined),
+      sendRefreshNudgeSent: vi.fn(async () => undefined),
+      sendRefreshNudgeFailed: vi.fn(async () => undefined)
+    };
+    const nudge = createRefreshNudge({
+      command: "claude",
+      args: ["--print", "refresh"],
+      offsetMs: 60_000,
+      timeoutMs: 120_000,
+      retryMs: 60_000,
+      runCommand,
+      notifier
+    });
+
+    nudge.schedule("2026-06-11T13:30:00.538Z", Date.now());
+    nudge.schedule("2026-06-11T13:30:00.523Z", Date.now());
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(notifier.sendRefreshNudgeScheduled).toHaveBeenCalledTimes(1);
+  });
+
   it("should retry after a failed command", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-06-11T13:31:01.000Z"));

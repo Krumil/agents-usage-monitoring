@@ -7,6 +7,7 @@ const DEFAULT_CLAUDE_REFRESH_TIMEOUT_MS = 120_000;
 const DEFAULT_CLAUDE_REFRESH_RETRY_MS = 60_000;
 const DEFAULT_CLAUDE_REFRESH_MAX_BUDGET_USD = "0.05";
 const MAX_COMMAND_OUTPUT_BYTES = 64 * 1024;
+const SAME_RESET_TOLERANCE_MS = 5 * 60_000;
 
 export interface SessionRefreshNudge {
   schedule(resetAt: string, nowMs: number): void;
@@ -71,6 +72,7 @@ export interface RefreshNudgeOptions {
 
 interface ScheduledRefresh {
   resetAt: string;
+  resetMs: number;
   dueMs: number;
 }
 
@@ -121,8 +123,8 @@ export function createClaudeRefreshNudgeOptionsFromEnv(
 export function createRefreshNudge(options: RefreshNudgeOptions): SessionRefreshNudge {
   const runCommand = options.runCommand ?? execFileCommandRunner;
   let scheduled: ScheduledRefresh | null = null;
-  let completedResetAt: string | null = null;
-  let failureNotifiedResetAt: string | null = null;
+  let completedResetMs: number | null = null;
+  let failureNotifiedResetMs: number | null = null;
   let runningResetAt: string | null = null;
   let timer: NodeJS.Timeout | null = null;
 
@@ -145,10 +147,11 @@ export function createRefreshNudge(options: RefreshNudgeOptions): SessionRefresh
   };
 
   const run = async (resetAt: string): Promise<void> => {
-    if (!scheduled || scheduled.resetAt !== resetAt || completedResetAt === resetAt) {
+    if (!scheduled || scheduled.resetAt !== resetAt || isSameReset(completedResetMs, scheduled.resetMs)) {
       return;
     }
 
+    const activeSchedule = scheduled;
     if (runningResetAt === resetAt) {
       return;
     }
@@ -158,7 +161,7 @@ export function createRefreshNudge(options: RefreshNudgeOptions): SessionRefresh
 
     try {
       await runCommand(options.command, options.args, { timeoutMs: options.timeoutMs });
-      completedResetAt = resetAt;
+      completedResetMs = activeSchedule.resetMs;
       if (scheduled?.resetAt === resetAt) {
         scheduled = null;
       }
@@ -174,8 +177,8 @@ export function createRefreshNudge(options: RefreshNudgeOptions): SessionRefresh
         retryMs: options.retryMs,
         error: errorMessage
       });
-      if (failureNotifiedResetAt !== resetAt) {
-        failureNotifiedResetAt = resetAt;
+      if (!isSameReset(failureNotifiedResetMs, activeSchedule.resetMs)) {
+        failureNotifiedResetMs = activeSchedule.resetMs;
         await notifyRefreshNudgeFailed(
           options,
           { resetAt, attemptedAt, retryAt, command: options.command, errorMessage },
@@ -195,14 +198,18 @@ export function createRefreshNudge(options: RefreshNudgeOptions): SessionRefresh
   return {
     schedule(resetAt: string, nowMs: number): void {
       const resetMs = Date.parse(resetAt);
-      if (!Number.isFinite(resetMs) || completedResetAt === resetAt || scheduled?.resetAt === resetAt) {
+      if (
+        !Number.isFinite(resetMs) ||
+        isSameReset(completedResetMs, resetMs) ||
+        isSameReset(scheduled?.resetMs ?? null, resetMs)
+      ) {
         return;
       }
 
       const dueMs = resetMs + options.offsetMs;
       const dueAt = new Date(dueMs).toISOString();
       const scheduledAt = new Date(nowMs).toISOString();
-      scheduled = { resetAt, dueMs };
+      scheduled = { resetAt, resetMs, dueMs };
       queueRun(resetAt, Math.max(0, dueMs - nowMs));
       log("info", "Scheduled Claude refresh nudge", {
         resetAt,
@@ -234,6 +241,10 @@ export const execFileCommandRunner: RefreshCommandRunner = (command, args, optio
       }
     );
   });
+
+function isSameReset(existingMs: number | null, resetMs: number): boolean {
+  return existingMs !== null && Math.abs(existingMs - resetMs) <= SAME_RESET_TOLERANCE_MS;
+}
 
 async function notifyRefreshNudgeScheduled(
   options: RefreshNudgeOptions,
