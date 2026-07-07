@@ -9,6 +9,7 @@ import type {
   UnavailableUsageLimits,
   UsageLimits
 } from "../shared/contracts.js";
+import type { SessionRefreshNudge } from "./refresh-nudge.js";
 
 const DEFAULT_USAGE_ENDPOINT = "https://api.anthropic.com/api/oauth/usage";
 const DEFAULT_CACHE_TTL_MS = 30_000;
@@ -27,6 +28,7 @@ export interface LimitsProviderOptions {
   fetchImpl?: typeof fetch;
   cacheTtlMs?: number;
   sessionRefreshNotifier?: SessionRefreshNotifier;
+  sessionRefreshNudge?: SessionRefreshNudge;
   onNotificationError?: (error: unknown, event: SessionRefreshEvent) => void;
 }
 
@@ -41,6 +43,7 @@ export interface PushedLimitsProvider extends LimitsProvider {
 export interface PushedLimitsProviderOptions {
   maxAgeMs?: number;
   sessionRefreshNotifier?: SessionRefreshNotifier;
+  sessionRefreshNudge?: SessionRefreshNudge;
   onNotificationError?: (error: unknown, event: SessionRefreshEvent) => void;
 }
 
@@ -48,9 +51,10 @@ const DEFAULT_PUSHED_MAX_AGE_MS = 300_000;
 
 export function createPushedLimitsProvider(options: PushedLimitsProviderOptions = {}): PushedLimitsProvider {
   const maxAgeMs = options.maxAgeMs ?? DEFAULT_PUSHED_MAX_AGE_MS;
-  const observer = options.sessionRefreshNotifier
+  const observer = options.sessionRefreshNotifier || options.sessionRefreshNudge
     ? createSessionRefreshObserver({
         notifier: options.sessionRefreshNotifier,
+        nudge: options.sessionRefreshNudge,
         onNotificationError: options.onNotificationError
       })
     : null;
@@ -99,6 +103,7 @@ export interface SessionRefreshNotifier {
 
 export interface SessionRefreshObserverOptions {
   notifier?: SessionRefreshNotifier | undefined;
+  nudge?: SessionRefreshNudge | undefined;
   onNotificationError?: ((error: unknown, event: SessionRefreshEvent) => void) | undefined;
 }
 
@@ -137,6 +142,7 @@ export function createLimitsProvider(options: LimitsProviderOptions = {}): Limit
   let lastGood: AvailableUsageLimits | null = null;
   const observer = createSessionRefreshObserver({
     notifier: options.sessionRefreshNotifier,
+    nudge: options.sessionRefreshNudge,
     onNotificationError: options.onNotificationError
   });
 
@@ -243,6 +249,8 @@ async function observeSessionRefresh(
   if (!sessionWindow || !isValidDate(sessionWindow.resetsAt)) {
     return;
   }
+
+  options.nudge?.schedule(sessionWindow.resetsAt, nowMs);
 
   if (!state.watchedResetAt) {
     state.watchedResetAt = sessionWindow.resetsAt;

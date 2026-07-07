@@ -4,6 +4,7 @@ import { loadEnvFile } from "node:process";
 
 import { createApp, resolveStaticDir } from "./app.js";
 import type { VapidConfig } from "./push.js";
+import { createClaudeRefreshNudgeFromEnv } from "./refresh-nudge.js";
 import { createTelegramSessionRefreshNotifierFromEnv } from "./telegram.js";
 
 const envPath = path.resolve(".env");
@@ -16,16 +17,24 @@ const port = Number(process.env.PORT ?? 4318);
 const databasePath = path.resolve(process.env.DATABASE_PATH ?? ".data/claude-usage.sqlite");
 const limitsSource = process.env.LIMITS_SOURCE === "push" ? "push" : "fetch";
 const sessionRefreshNotifier = limitsSource === "push" ? null : createTelegramSessionRefreshNotifierFromEnv();
+const sessionRefreshNudge = limitsSource === "push" ? null : createClaudeRefreshNudgeFromEnv();
 
 const vapid = resolveVapidConfig();
 const dailySummaryHour = resolveDailySummaryHour(process.env.DAILY_SUMMARY_HOUR);
+const limits =
+  sessionRefreshNotifier || sessionRefreshNudge
+    ? {
+        ...(sessionRefreshNotifier ? { sessionRefreshNotifier } : {}),
+        ...(sessionRefreshNudge ? { sessionRefreshNudge } : {})
+      }
+    : undefined;
 
 const app = await createApp({
   databasePath,
   port,
   staticDir: resolveStaticDir(),
   limitsSource,
-  ...(sessionRefreshNotifier ? { limits: { sessionRefreshNotifier } } : {}),
+  ...(limits ? { limits } : {}),
   ...(vapid ? { vapid } : {}),
   ...(dailySummaryHour !== undefined ? { dailySummaryHour } : {})
 });

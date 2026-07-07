@@ -82,6 +82,30 @@ Data is stored in `.data/claude-usage.sqlite`. Delete the file to start fresh.
 
 The dashboard shows remaining session (5h) and weekly plan limits at the top. The server reads the OAuth token from `~/.claude/.credentials.json` and queries `https://api.anthropic.com/api/oauth/usage` (the same unofficial endpoint Claude Code's `/usage` screen uses), cached for 30 seconds. Anthropic reports utilization percentages and reset times, not raw token counts. If the token is missing or expired, the strip shows why instead of failing.
 
+## Automatic refresh nudge
+
+The local fetch process schedules a small Claude CLI prompt one minute after each observed 5h reset. Claude Code refreshes the OAuth token only after a message is sent, so this keeps the token current without waiting for your next manual prompt.
+
+This runs in the local server (`LIMITS_SOURCE=fetch`) and in the local limits pusher used with a remote dashboard. The remote push-mode server never runs Claude.
+
+Default command:
+
+```bash
+claude --safe-mode --print --no-session-persistence --tools "" --max-budget-usd 0.05 "Reply only with: refreshed"
+```
+
+Disable or tune it with env:
+
+```bash
+export CLAUDE_REFRESH_NUDGE=0          # disable
+export CLAUDE_REFRESH_OFFSET_MS=60000  # wait 1 minute after the reset estimate
+export CLAUDE_REFRESH_TIMEOUT_MS=120000
+export CLAUDE_REFRESH_RETRY_MS=60000
+export CLAUDE_REFRESH_CLI=claude
+export CLAUDE_REFRESH_PROMPT="Reply only with: refreshed"
+export CLAUDE_REFRESH_MAX_BUDGET_USD=0.05
+```
+
 ## Telegram session refresh alerts
 
 Set these variables before starting the server to get a Telegram message when the observed 5h Claude Code token session refreshes:
@@ -102,6 +126,13 @@ When both values are set, the server checks plan limits every 60 seconds. The al
 | `HOST` | `0.0.0.0` | Server bind address |
 | `DATABASE_PATH` | `.data/claude-usage.sqlite` | SQLite database location |
 | `LIMITS_SOURCE` | `fetch` | `fetch` reads the local OAuth token and queries Anthropic; `push` serves a snapshot sent to `POST /api/limits/ingest` (used for remote deployment) |
+| `CLAUDE_REFRESH_NUDGE` | enabled | Set to `0`, `false`, `no`, or `off` to disable the automatic Claude refresh prompt |
+| `CLAUDE_REFRESH_OFFSET_MS` | `60000` | Delay after the observed 5h reset before sending the refresh prompt |
+| `CLAUDE_REFRESH_TIMEOUT_MS` | `120000` | Timeout for the Claude refresh command |
+| `CLAUDE_REFRESH_RETRY_MS` | `60000` | Delay before retrying a failed refresh command |
+| `CLAUDE_REFRESH_CLI` | `claude` | Claude CLI command path |
+| `CLAUDE_REFRESH_PROMPT` | `Reply only with: refreshed` | Prompt sent by the automatic refresh command |
+| `CLAUDE_REFRESH_MAX_BUDGET_USD` | `0.05` | Max budget passed to `claude --max-budget-usd` |
 | `TELEGRAM_BOT_TOKEN` | unset | Telegram bot token for session refresh alerts |
 | `TELEGRAM_CHAT_ID` | unset | Telegram chat ID that receives session refresh alerts |
 | `VAPID_PUBLIC_KEY` | unset | Web Push public VAPID key; enables phone push notifications in push mode when set with the private key and subject |
@@ -114,14 +145,15 @@ The limits pusher (`dist/server/server/limits-pusher.js`) reads:
 | Env var | Default | Description |
 | --- | --- | --- |
 | `DASHBOARD_INGEST_URL` | required | URL of the remote `POST /api/limits/ingest` endpoint |
+| `DASHBOARD_INGEST_AUTH` | unset | Optional `Authorization` header value for the remote reverse proxy, for example `Basic <base64>` |
 | `LIMITS_PUSH_INTERVAL_MS` | `60000` | How often to fetch and push the limits snapshot |
 
 ## Remote deployment
 
 To keep the dashboard always up on a server while keeping your Claude OAuth token on your own machine:
 
-- **Server** (`LIMITS_SOURCE=push`) receives telemetry, serves the dashboard, and exposes `POST /api/limits/ingest`. It never reads a token. The ingest endpoint is unauthenticated, so a reverse proxy with TLS (and auth, if the server is publicly reachable) is the only access perimeter.
-- **Local machine** runs the limits pusher, which fetches plan limits with your local token, sends Telegram alerts, and pushes only the resulting snapshot (utilization percentages and reset times) to the server. The token never leaves your machine.
+- **Server** (`LIMITS_SOURCE=push`) receives telemetry, serves the dashboard, and exposes `POST /api/limits/ingest`. It never reads a token. The ingest endpoint is unauthenticated, so a reverse proxy with TLS (and auth, if the server is publicly reachable) is the only access perimeter. If the proxy requires auth, set `DASHBOARD_INGEST_AUTH` on the local limits pusher.
+- **Local machine** runs the limits pusher, which fetches plan limits with your local token, runs the refresh nudge, sends Telegram alerts, and pushes only the resulting snapshot (utilization percentages and reset times) to the server. The token never leaves your machine.
 
 Point Claude Code at the server by setting `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` to the server's `/v1/metrics` URL (add an `OTEL_EXPORTER_OTLP_METRICS_HEADERS=Authorization=...` entry if the proxy requires auth).
 

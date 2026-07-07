@@ -181,7 +181,10 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
     );
     app.get("/api/limits", async () => limitsProvider.getLimits());
 
-    if (options.limits?.sessionRefreshNotifier && options.limitsWatchIntervalMs !== 0) {
+    if (
+      (options.limits?.sessionRefreshNotifier || options.limits?.sessionRefreshNudge) &&
+      options.limitsWatchIntervalMs !== 0
+    ) {
       const intervalMs = options.limitsWatchIntervalMs ?? 60_000;
       const pollLimits = (): void => {
         void limitsProvider.getLimits().catch((error: unknown) => {
@@ -195,6 +198,12 @@ export async function createApp(options: CreateAppOptions): Promise<FastifyInsta
       });
 
       pollLimits();
+    }
+
+    if (options.limits?.sessionRefreshNudge) {
+      app.addHook("onClose", async () => {
+        options.limits?.sessionRefreshNudge?.stop();
+      });
     }
   }
 

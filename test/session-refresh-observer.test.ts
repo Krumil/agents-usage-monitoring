@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createSessionRefreshObserver, type SessionRefreshNotifier } from "../src/server/limits.js";
-import type { AvailableUsageLimits } from "../src/shared/contracts.js";
+import type { SessionRefreshNudge } from "../src/server/refresh-nudge.js";
+import type { AvailableUsageLimits, UsageLimits } from "../src/shared/contracts.js";
 
 function limits(resetsAt: string, usedPercent = 10): AvailableUsageLimits {
   return {
@@ -53,5 +54,31 @@ describe("session refresh observer", () => {
     await observer.observe(limits(reset), Date.parse("2026-06-11T13:29:30Z"));
 
     await expect(observer.observe(limits(reset), Date.parse("2026-06-11T13:31:00Z"))).resolves.toBeUndefined();
+  });
+
+  it("should schedule a refresh nudge from the session reset time", async () => {
+    const reset = "2026-06-11T13:30:00+00:00";
+    const observedAtMs = Date.parse("2026-06-11T13:29:30Z");
+    const nudge: SessionRefreshNudge = { schedule: vi.fn(), stop: vi.fn() };
+    const observer = createSessionRefreshObserver({ nudge });
+
+    await observer.observe(limits(reset), observedAtMs);
+
+    expect(nudge.schedule).toHaveBeenCalledWith(reset, observedAtMs);
+  });
+
+  it("should not schedule a refresh nudge without a valid session window", async () => {
+    const nudge: SessionRefreshNudge = { schedule: vi.fn(), stop: vi.fn() };
+    const observer = createSessionRefreshObserver({ nudge });
+    const unavailable: UsageLimits = {
+      available: false,
+      fetchedAt: "2026-06-11T13:29:30.000Z",
+      reason: "Usage unavailable."
+    };
+
+    await observer.observe(unavailable, Date.parse("2026-06-11T13:29:30Z"));
+    await observer.observe(limits("not-a-date"), Date.parse("2026-06-11T13:29:31Z"));
+
+    expect(nudge.schedule).not.toHaveBeenCalled();
   });
 });

@@ -4,6 +4,7 @@ import { loadEnvFile } from "node:process";
 
 import type { UsageLimits } from "../shared/contracts.js";
 import { createLimitsProvider } from "./limits.js";
+import { createClaudeRefreshNudgeFromEnv } from "./refresh-nudge.js";
 import { createTelegramSessionRefreshNotifierFromEnv } from "./telegram.js";
 
 const envPath = path.resolve(".env");
@@ -12,6 +13,7 @@ if (fs.existsSync(envPath)) {
 }
 
 const ingestUrl = process.env.DASHBOARD_INGEST_URL;
+const ingestAuth = process.env.DASHBOARD_INGEST_AUTH;
 const intervalMs = Number(process.env.LIMITS_PUSH_INTERVAL_MS ?? 60_000);
 
 if (!ingestUrl) {
@@ -19,8 +21,12 @@ if (!ingestUrl) {
 }
 
 const notifier = createTelegramSessionRefreshNotifierFromEnv();
+const sessionRefreshNudge = createClaudeRefreshNudgeFromEnv(process.env, (level, message, data) => {
+  log(level, message, data);
+});
 const provider = createLimitsProvider({
   ...(notifier ? { sessionRefreshNotifier: notifier } : {}),
+  ...(sessionRefreshNudge ? { sessionRefreshNudge } : {}),
   onNotificationError: (error, event) => {
     log("error", "Telegram session refresh alert failed", { event, error: describeError(error) });
   }
@@ -28,11 +34,16 @@ const provider = createLimitsProvider({
 
 async function pushLimits(target: string): Promise<void> {
   const limits = await provider.getLimits();
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json"
+  };
+  if (ingestAuth) {
+    headers.Authorization = ingestAuth;
+  }
+
   const response = await fetch(target, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
+    headers,
     body: JSON.stringify(limits)
   });
 
@@ -52,11 +63,17 @@ function tick(target: string): void {
 const interval = setInterval(() => tick(ingestUrl), intervalMs);
 tick(ingestUrl);
 
-log("info", "Limits pusher started", { ingestUrl, intervalMs, telegram: notifier !== null });
+log("info", "Limits pusher started", {
+  ingestUrl,
+  intervalMs,
+  telegram: notifier !== null,
+  refreshNudge: sessionRefreshNudge !== null
+});
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
     clearInterval(interval);
+    sessionRefreshNudge?.stop();
     process.exit(0);
   });
 }
