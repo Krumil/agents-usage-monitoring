@@ -132,7 +132,7 @@ When both values are set, the server checks plan limits every 60 seconds. The al
 | `CLAUDE_REFRESH_OFFSET_MS` | `60000` | Delay after the observed 5h reset before sending the refresh prompt |
 | `CLAUDE_REFRESH_TIMEOUT_MS` | `120000` | Timeout for the Claude refresh command |
 | `CLAUDE_REFRESH_RETRY_MS` | `60000` | Delay before retrying a failed refresh command |
-| `CLAUDE_REFRESH_CLI` | `claude` | Claude CLI command path |
+| `CLAUDE_REFRESH_CLI` | `claude` | Claude CLI command path; use an absolute path for systemd services if `claude` is not on the service PATH |
 | `CLAUDE_REFRESH_PROMPT` | `Reply only with: refreshed` | Prompt sent by the automatic refresh command |
 | `CLAUDE_REFRESH_MAX_BUDGET_USD` | `0.05` | Max budget passed to `claude --max-budget-usd` |
 | `TELEGRAM_BOT_TOKEN` | unset | Telegram bot token for session refresh alerts |

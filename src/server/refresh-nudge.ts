@@ -227,7 +227,7 @@ export function createRefreshNudge(options: RefreshNudgeOptions): SessionRefresh
 
 export const execFileCommandRunner: RefreshCommandRunner = (command, args, options) =>
   new Promise((resolve, reject) => {
-    execFile(
+    const child = execFile(
       command,
       [...args],
       { timeout: options.timeoutMs, maxBuffer: MAX_COMMAND_OUTPUT_BYTES },
@@ -240,6 +240,7 @@ export const execFileCommandRunner: RefreshCommandRunner = (command, args, optio
         resolve();
       }
     );
+    child.stdin?.end();
   });
 
 function isSameReset(existingMs: number | null, resetMs: number): boolean {
