@@ -13,6 +13,33 @@ export interface SessionRefreshNudge {
   stop(): void;
 }
 
+export interface RefreshNudgeScheduledEvent {
+  resetAt: string;
+  dueAt: string;
+  scheduledAt: string;
+  command: string;
+}
+
+export interface RefreshNudgeSentEvent {
+  resetAt: string;
+  attemptedAt: string;
+  command: string;
+}
+
+export interface RefreshNudgeFailedEvent {
+  resetAt: string;
+  attemptedAt: string;
+  retryAt: string;
+  command: string;
+  errorMessage: string;
+}
+
+export interface RefreshNudgeNotifier {
+  sendRefreshNudgeScheduled(event: RefreshNudgeScheduledEvent): Promise<void>;
+  sendRefreshNudgeSent(event: RefreshNudgeSentEvent): Promise<void>;
+  sendRefreshNudgeFailed(event: RefreshNudgeFailedEvent): Promise<void>;
+}
+
 export interface RefreshCommandOptions {
   timeoutMs: number;
 }
@@ -38,6 +65,7 @@ export interface RefreshNudgeOptions {
   timeoutMs: number;
   retryMs: number;
   runCommand?: RefreshCommandRunner;
+  notifier?: RefreshNudgeNotifier;
   onLog?: RefreshNudgeLogHandler;
 }
 
@@ -48,16 +76,18 @@ interface ScheduledRefresh {
 
 export function createClaudeRefreshNudgeFromEnv(
   env: NodeJS.ProcessEnv = process.env,
-  onLog: RefreshNudgeLogHandler = defaultLog
+  onLog: RefreshNudgeLogHandler = defaultLog,
+  notifier?: RefreshNudgeNotifier
 ): SessionRefreshNudge | null {
-  const options = createClaudeRefreshNudgeOptionsFromEnv(env, onLog);
+  const options = createClaudeRefreshNudgeOptionsFromEnv(env, onLog, undefined, notifier);
   return options ? createRefreshNudge(options) : null;
 }
 
 export function createClaudeRefreshNudgeOptionsFromEnv(
   env: NodeJS.ProcessEnv = process.env,
   onLog: RefreshNudgeLogHandler = defaultLog,
-  runCommand?: RefreshCommandRunner
+  runCommand?: RefreshCommandRunner,
+  notifier?: RefreshNudgeNotifier
 ): RefreshNudgeOptions | null {
   if (isDisabled(env.CLAUDE_REFRESH_NUDGE)) {
     return null;
@@ -83,6 +113,7 @@ export function createClaudeRefreshNudgeOptionsFromEnv(
     timeoutMs: readPositiveIntegerEnv(env, "CLAUDE_REFRESH_TIMEOUT_MS", DEFAULT_CLAUDE_REFRESH_TIMEOUT_MS),
     retryMs: readPositiveIntegerEnv(env, "CLAUDE_REFRESH_RETRY_MS", DEFAULT_CLAUDE_REFRESH_RETRY_MS),
     ...(runCommand ? { runCommand } : {}),
+    ...(notifier ? { notifier } : {}),
     onLog
   };
 }
@@ -91,6 +122,7 @@ export function createRefreshNudge(options: RefreshNudgeOptions): SessionRefresh
   const runCommand = options.runCommand ?? execFileCommandRunner;
   let scheduled: ScheduledRefresh | null = null;
   let completedResetAt: string | null = null;
+  let failureNotifiedResetAt: string | null = null;
   let runningResetAt: string | null = null;
   let timer: NodeJS.Timeout | null = null;
 
@@ -131,14 +163,25 @@ export function createRefreshNudge(options: RefreshNudgeOptions): SessionRefresh
         scheduled = null;
       }
       log("info", "Claude refresh nudge sent", { resetAt, attemptedAt, command: options.command });
+      await notifyRefreshNudgeSent(options, { resetAt, attemptedAt, command: options.command }, log);
     } catch (error) {
+      const retryAt = new Date(Date.now() + options.retryMs).toISOString();
+      const errorMessage = describeError(error);
       log("error", "Claude refresh nudge failed", {
         resetAt,
         attemptedAt,
         command: options.command,
         retryMs: options.retryMs,
-        error: describeError(error)
+        error: errorMessage
       });
+      if (failureNotifiedResetAt !== resetAt) {
+        failureNotifiedResetAt = resetAt;
+        await notifyRefreshNudgeFailed(
+          options,
+          { resetAt, attemptedAt, retryAt, command: options.command, errorMessage },
+          log
+        );
+      }
       if (scheduled?.resetAt === resetAt) {
         queueRun(resetAt, options.retryMs);
       }
@@ -157,13 +200,16 @@ export function createRefreshNudge(options: RefreshNudgeOptions): SessionRefresh
       }
 
       const dueMs = resetMs + options.offsetMs;
+      const dueAt = new Date(dueMs).toISOString();
+      const scheduledAt = new Date(nowMs).toISOString();
       scheduled = { resetAt, dueMs };
       queueRun(resetAt, Math.max(0, dueMs - nowMs));
       log("info", "Scheduled Claude refresh nudge", {
         resetAt,
-        dueAt: new Date(dueMs).toISOString(),
+        dueAt,
         command: options.command
       });
+      void notifyRefreshNudgeScheduled(options, { resetAt, dueAt, scheduledAt, command: options.command }, log);
     },
     stop(): void {
       clearTimer();
@@ -188,6 +234,54 @@ export const execFileCommandRunner: RefreshCommandRunner = (command, args, optio
       }
     );
   });
+
+async function notifyRefreshNudgeScheduled(
+  options: RefreshNudgeOptions,
+  event: RefreshNudgeScheduledEvent,
+  log: RefreshNudgeLogHandler
+): Promise<void> {
+  try {
+    await options.notifier?.sendRefreshNudgeScheduled(event);
+  } catch (error) {
+    log("error", "Refresh nudge Telegram notification failed", {
+      event: "scheduled",
+      resetAt: event.resetAt,
+      error: describeError(error)
+    });
+  }
+}
+
+async function notifyRefreshNudgeSent(
+  options: RefreshNudgeOptions,
+  event: RefreshNudgeSentEvent,
+  log: RefreshNudgeLogHandler
+): Promise<void> {
+  try {
+    await options.notifier?.sendRefreshNudgeSent(event);
+  } catch (error) {
+    log("error", "Refresh nudge Telegram notification failed", {
+      event: "sent",
+      resetAt: event.resetAt,
+      error: describeError(error)
+    });
+  }
+}
+
+async function notifyRefreshNudgeFailed(
+  options: RefreshNudgeOptions,
+  event: RefreshNudgeFailedEvent,
+  log: RefreshNudgeLogHandler
+): Promise<void> {
+  try {
+    await options.notifier?.sendRefreshNudgeFailed(event);
+  } catch (error) {
+    log("error", "Refresh nudge Telegram notification failed", {
+      event: "failed",
+      resetAt: event.resetAt,
+      error: describeError(error)
+    });
+  }
+}
 
 function readStringEnv(value: string | undefined): string | null {
   return value === undefined || value === "" ? null : value;

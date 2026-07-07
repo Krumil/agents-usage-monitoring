@@ -21,9 +21,13 @@ if (!ingestUrl) {
 }
 
 const notifier = createTelegramSessionRefreshNotifierFromEnv();
-const sessionRefreshNudge = createClaudeRefreshNudgeFromEnv(process.env, (level, message, data) => {
-  log(level, message, data);
-});
+const sessionRefreshNudge = createClaudeRefreshNudgeFromEnv(
+  process.env,
+  (level, message, data) => {
+    log(level, message, data);
+  },
+  notifier ?? undefined
+);
 const provider = createLimitsProvider({
   ...(notifier ? { sessionRefreshNotifier: notifier } : {}),
   ...(sessionRefreshNudge ? { sessionRefreshNudge } : {}),

@@ -17,7 +17,10 @@ const port = Number(process.env.PORT ?? 4318);
 const databasePath = path.resolve(process.env.DATABASE_PATH ?? ".data/claude-usage.sqlite");
 const limitsSource = process.env.LIMITS_SOURCE === "push" ? "push" : "fetch";
 const sessionRefreshNotifier = limitsSource === "push" ? null : createTelegramSessionRefreshNotifierFromEnv();
-const sessionRefreshNudge = limitsSource === "push" ? null : createClaudeRefreshNudgeFromEnv();
+const sessionRefreshNudge =
+  limitsSource === "push"
+    ? null
+    : createClaudeRefreshNudgeFromEnv(process.env, undefined, sessionRefreshNotifier ?? undefined);
 
 const vapid = resolveVapidConfig();
 const dailySummaryHour = resolveDailySummaryHour(process.env.DAILY_SUMMARY_HOUR);

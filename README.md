@@ -88,6 +88,8 @@ The local fetch process schedules a small Claude CLI prompt one minute after eac
 
 This runs in the local server (`LIMITS_SOURCE=fetch`) and in the local limits pusher used with a remote dashboard. The remote push-mode server never runs Claude.
 
+When Telegram alerts are configured, the same chat also receives a message when the refresh nudge is scheduled, when the Claude command succeeds, and on the first failed attempt for a reset.
+
 Default command:
 
 ```bash
